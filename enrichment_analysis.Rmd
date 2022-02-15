@@ -1,0 +1,273 @@
+---
+title: "Pathway enrichment analysis with clusterProfiler"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 使用clusterProfiler进行富集分析
+
+## 环境准备
+
+### R包安装和加载
+
+安装分析所需要的R包
+
+```{r}
+if (!requireNamespace("BiocManager")){
+  install.packages("BiocManager")
+}
+if (!requireNamespace("edgeR")){
+  BiocManager::install("edgeR")
+}
+if (!requireNamespace("clusterProfiler")){
+  BiocManager::install("clusterProfiler")
+}
+if (!requireNamespace("org.Hs.eg.db")){
+  BiocManager::install("org.Hs.eg.db")
+}
+
+```
+
+R包加载
+
+```{r, message=FALSE}
+library(edgeR)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+```
+
+### 数据导入
+
+数据信息: 
+
+- 来源: TCGA Ovarian Serous Cystadenocarcinoma(OSC)
+- 日期: 2017-06-14 
+- 下载工具: TCGABiolinks(R)
+- 类型: RNA-seq(RSEM)
+- 样本大小: 296
+  - 79 Immunoreactive(免疫反应物);
+  - 71 Mesenchymal(间充质);
+  - 67 Differentiated(分化);
+  - 79 Proliferative(增生);
+
+表达量数据数据导入:
+
+```{r}
+raw_count <- read.table("./TCGA_RNASeq_rawcounts.txt", 
+                        sep = "\t",
+                        stringsAsFactors = FALSE,
+                        header = TRUE)
+dim(raw_count)
+```
+
+查看部分数据
+
+```{r}
+raw_count[1:10,1:10]
+```
+
+分组信息导入
+
+```{r}
+groups_df <- read.table("./RNASeq_classdefinitions.txt",
+                        header = TRUE,
+                        sep = "\t", stringsAsFactors = FALSE)
+head(groups_df)
+```
+
+
+## 差异表达分析
+
+### 数据预过滤
+
+根据CPM值，过滤低表达的基因. 标准是基因至少在50个样本量的表达量超过1
+
+```{r}
+cpms <- cpm(raw_count)
+keep <- rowSums(cpms > 1) >= 50
+counts <- raw_count[keep,]
+dim(counts)
+```
+### 数据标准化和离散度(Dispersion)分析
+
+创建`DGEList`类，用于存放表达量和样本信息
+
+```{r}
+# create data structure to hold counts and subtype information for each sample.
+d <- DGEList(counts=counts, group=groups_df$SUBTYPE)
+```
+
+对原始文库数据计算标准化因子
+
+```{r}
+#Normalize the data
+d <- calcNormFactors(d)
+```
+
+样本间距离
+
+```{r}
+#create multidimensional scaling(MDS) plot. The command below will automatically
+# generate the plot containing all samples where each subtype is a different color.
+#Ideally there should be a good separation between the different classes.
+mds_output <- plotMDS(d, labels=NULL, pch = 1,
+                      col= c("darkgreen","blue","red","orange")[factor(groups_df$SUBTYPE)],
+                      xlim = c(-2.5,4), ylim = c(-2.5,4))
+legend("topright",
+       legend=levels(factor(groups_df$SUBTYPE)),
+       pch=c(1), col= c("darkgreen","blue","red", "orange"),title="Class",
+       bty = 'n', cex = 0.75)
+
+```
+
+计算离散度
+
+```{r}
+#calculate dispersion
+d <- estimateCommonDisp(d)
+d <- estimateTagwiseDisp(d)
+```
+
+### 差异表达分析
+
+两样本使用`exactTest`即可.
+
+> 多样本需要用`model.matrix`, `makeContrasts`,` glmFit`,`glmLRT`等函数。
+
+```{r}
+de <- exactTest(d, pair=c("Immunoreactive","Mesenchymal"))
+tt_exact_test <- topTags(de,n=nrow(d))
+```
+
+保存结果:
+
+```{r}
+output_df <- cbind(gene=row.names(tt_exact_test),
+                   as.data.frame(tt_exact_test))
+write.csv(output_df, file = "edgeR_DEG.csv",
+          row.names = FALSE)
+```
+
+
+## 富集分析
+
+读取数据
+
+
+```{r}
+deg_df <- read.table("./edgeR_DEG.csv",
+                     header = TRUE,
+                     sep = ",",
+                     stringsAsFactors = FALSE)
+
+```
+
+数据预处理: 将基因列拆分
+
+```{r}
+deg_df$symbol <- do.call(rbind, strsplit(deg_df$gene, "|", fixed = TRUE))[,1]
+deg_df$geneID <- do.call(rbind, strsplit(deg_df$gene, "|", fixed = TRUE))[,2]
+head(deg_df)
+```
+
+### GO分析
+
+第一步: 筛选目标基因集。例如logFC >1, FDR < 0.05 认为是显著性上调
+
+
+```{r}
+flt <- deg_df[deg_df$logFC > 1 & deg_df$FDR < 0.05,]
+up_gene <- flt$geneID
+```
+
+第二步(1): GO富集分析
+
+```{r}
+ego <- enrichGO(up_gene,
+                OrgDb = org.Hs.eg.db,
+                keyType = "ENTREZID",
+                ont = "BP")
+```
+
+第二步(2): KEGG富集分析
+
+```{r}
+ekegg <- enrichKEGG(up_gene,
+                    organism = "hsa",
+                    keyType = "kegg")
+```
+
+
+第三步: 可视化
+
+柱形图
+
+```{r}
+barplot(ego, 
+        showCategory = 20)
+```
+
+气泡图
+
+```{r}
+dotplot(ego)
+```
+
+```{r}
+dotplot(ekegg)
+```
+
+
+```{r}
+View(as.data.frame(ekegg))
+```
+
+```{r}
+browseKEGG(ekegg, "hsa05224")
+```
+
+### GSEA分析
+
+
+第一步: 构建排序基因表
+
+```{r}
+rank_list <- deg_df$logFC
+names(rank_list) <- deg_df$geneID
+rank_list <- sort(rank_list, decreasing = TRUE)
+
+```
+
+第二步: GSEA分析
+
+```{r}
+gseago <- gseGO(rank_list,
+      ont = "BP",
+      OrgDb = org.Hs.eg.db,
+      keyType = "ENTREZID")
+
+gseakegg <- gseKEGG(rank_list,
+                    organism = "hsa",
+                    keyType = "kegg")
+```
+
+第三步: 可视化
+
+冒泡图
+
+```{r}
+dotplot(gseakegg)
+```
+
+GSEA图
+
+```{r}
+View(as.data.frame(gseakegg))
+```
+
+```{r}
+enrichplot::gseaplot2(gseakegg, "hsa05224")
+```
