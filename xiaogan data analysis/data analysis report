@@ -1,0 +1,8 @@
+孝感数据分析报告
+注： excel中n22为末次月经时间  ae19为预产期
+孝感市经纬度范围： 113.317 ~ 114.585   30.382 ~ 31.585 
+妊娠期的划分  ：  根据Trimester-Specific Blood Trihalomethane and Urinary Haloacetic Acid Concentrations and Adverse Birth Outcomes: 
+Identifying Windows of Vulnerability during Pregnancy对于妊娠期的划分，确定为 first Trimester < 14wk ;second Trimester 14-27 wk ; third Trimester > 27wk
+数据前处理： 全人群共计1760人， 去除100人缺失新生儿出生日期，剩余1660人，个别研究对象新生儿出生日期存在明显错误，根据预产期和末次月经时间校正后得到最终excel，
+E:/LUZHONGHUA/ZHONGHUA/xiaogan/1660_all_data.csv
+
