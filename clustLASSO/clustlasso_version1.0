@@ -1,0 +1,132 @@
+## write environment Rstudio
+## R version 4.1.1
+## last edit "2022-01-23 10:30:29 CST"
+gc()
+rm(list = ls())
+## install packages -------------------------------------------------------------------------
+#install.packages("NMF")
+library(NMF)
+install.packages("D:/chrome下载/clustlasso-master.tar.gz", repos = NULL, type = "source")
+suppressWarnings(suppressMessages(library(clustlasso)))
+
+
+## import data -------------------------------------------------------------------------------
+setwd('D:/R/demo')
+my_dat <- read.csv('demo.csv')
+
+## split data to train-data and test-data=====================================================
+#install.packages('caret')
+library(caret)
+suppressWarnings(suppressMessages(library(clustlasso)))
+seed <- 2022
+set.seed(seed)
+index <-createDataPartition(my_dat$sampleID, time=1, p=0.7, list=F)
+train.data <- my_dat[index,]
+y_train <- as.numeric(train.data$class)
+train.data <- as.matrix(train.data[,3:ncol(train.data)])
+
+test.data <- (my_dat[-index,])
+y_test <- as.numeric(test.data$class)
+test.data <- as.matrix(test.data[,3:ncol(test.data)])
+
+##=======================Cross-validation process =============================================
+#3 specify cross-validation parameters=========================================================
+n.folds = 10
+n.lambda = 100
+n.repeat = 3
+# run cross-validation process
+cv.res.lasso = lasso_cv(train.data, y_train, 
+                        n.lambda = n.lambda, n.folds = n.folds, n.repeat = n.repeat, 
+                        seed = seed, verbose = FALSE)
+par(mfcol = c(1, 3))
+show_cv_overall(cv.res.lasso, modsel.criterion = "balanced.accuracy.best", best.eps = 1)
+
+## select the best model
+layout(matrix(c(1, 2, 3), nrow = 1, byrow = TRUE), width = c(0.3, 0.3, 0.4), height = c(1))
+perf.best.lasso = show_cv_best(cv.res.lasso, modsel.criterion = "balanced.accuracy.best", best.eps = 1, method = "lasso")
+
+# print cross-validation performance of best model
+print(perf.best.lasso)
+## extract the best model result 
+best.model.lasso = extract_best_model(cv.res.lasso, modsel.criterion = "balanced.accuracy.best", best.eps = 1)
+best.model.lasso$indices
+
+## apply the best model result to test-data==================================================
+# make predictions
+preds.lasso = predict_clustlasso(test.data, best.model.lasso)
+# compute performance
+perf.lasso = compute_perf(preds.lasso$preds, preds.lasso$probs, y_test)
+# print
+print(t(perf.lasso$perf))
+
+par(mfcol = c(1, 2))
+plot(perf.lasso$roc.curves[[1]], lwd = 2, main = "lasso - test set ROC curve")
+grid()
+plot(perf.lasso$pr.curves[[1]], lwd = 2, main = "lasso - test set precision / recall curve")
+grid()
+
+##============================cluster-Lasso process==========================================
+##===========================================================================================
+# specify cross-validation parameters
+n.folds = 10
+n.lambda = 100
+n.repeat = 3
+
+# specify screening and clustering thresholds
+screen.thresh = 0.95
+clust.thresh = 0.95
+
+# run cross-validation process
+cv.res.cluster = clusterlasso_cv(train.data, y_train,
+                                 n.lambda = n.lambda, n.folds = n.folds, n.repeat = n.repeat,
+                                 seed = seed, screen.thresh = screen.thresh, clust.thresh = clust.thresh,
+                                 verbose = FALSE)
+
+par(mfcol = c(1, 3))
+show_cv_overall(cv.res.cluster, modsel.criterion = "balanced.accuracy.best",
+                best.eps = 1)
+
+## Selecting the best model
+layout(matrix(c(1, 2, 3, 4, 4, 4), nrow = 2, byrow = TRUE), width = c(0.3,0.3, 0.4), height = c(0.6, 0.4))
+perf.best.cluster = show_cv_best(cv.res.cluster, modsel.criterion = "balanced.accuracy.best",
+                                 best.eps = 1, method = "clusterlasso")
+
+# print cross-validation performance of best model
+print(perf.best.cluster)
+
+best.model.cluster = extract_best_model(cv.res.cluster, modsel.criterion = "balanced.accuracy.best",
+                                        best.eps = 1, method = "clusterlasso")
+best.model.cluster$cluster.ids$ind.active
+# make predictions
+preds.cluster = predict_clustlasso(test.data, best.model.cluster,
+                                   method = "clusterlasso")
+# compute performance
+perf.cluster = compute_perf(preds.cluster$preds, preds.cluster$probs, y_test)
+# print
+print(t(perf.cluster$perf))
+
+## get the name we need
+aa <- best.model.lasso$indices+2
+colnames(my_dat)[aa]
+bb <- best.model.cluster$cluster.ids$ind.active+2
+colnames(my_dat)[bb]
+
+##=================compare the two method performance==========================================
+##=============================================================================================
+plot(perf.lasso$roc.curves[[1]], lwd = 2, main = "test set ROC curves")
+points(1 - (perf.lasso$perf$speci)/100, perf.lasso$perf$sensi/100, pch = 19, col = 1, cex = 1.25)
+plot(perf.cluster$roc.curves[[1]], lwd = 2, col = 2, add = TRUE)
+points(1 - (perf.cluster$perf$speci)/100, perf.cluster$perf$sensi/100,
+       pch = 17, col = 2, cex = 1.25)
+grid()
+abline(0, 1, lty = 2)
+legend("bottomright", c("lasso", "cluster-lasso"), col = c(1, 2), lwd = 2)
+
+heatmap_correlation_signatures(my_dat[,3:ncol(my_dat)], best.model.lasso, best.model.cluster,
+                               clust.min = 5, plot.title = "features correlation matrix")
+
+## change my_dat$class '-1' to '0' for glm
+library(plyr)
+my_dat$class <- as.character(my_dat$class)
+my_dat$class <- revalue(my_dat$class, c("-1" = "0"))
+
