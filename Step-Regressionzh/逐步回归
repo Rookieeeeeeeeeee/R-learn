@@ -1,0 +1,14 @@
+## step AIC 
+library(MASS)
+setwd('D:/R/demo')
+my_df <- read.csv('demo.csv')
+my_df <- my_df[,-1]
+library(plyr)
+my_df$class <- as.character(my_df$class)
+my_df$class <- revalue(my_df$class, c("-1" = "0"))
+my_df$class <- as.numeric(my_df$class)
+head(my_df)
+fitmodel <- glm(formula = class ~ . ,family = 'binomial',data = my_df)  
+## family can choose 'binomical' 'gaussian'
+stepaic <- stepAIC(fitmodel,direction = 'backward')
+summary(stepaic)
